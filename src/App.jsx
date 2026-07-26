@@ -96,7 +96,7 @@ const SHARE_DURATIONS = [
 ]
 
 // ============================================================
-// 3. UTILITIES & EXTERNAL UPLOAD (ใช้ Litterbox Catbox + Proxy แก้ CORS)
+// 3. UTILITIES & EXTERNAL UPLOAD (ใช้ tmpfiles.org ลบอัตโนมัติใน 24 ชม.)
 // ============================================================
 const fileToBase64 = (file) => {
   return new Promise((resolve, reject) => {
@@ -143,26 +143,24 @@ const base64ToBlob = (base64Str) => {
   return new Blob([uInt8Array], { type: contentType })
 }
 
-// อัปโหลดไฟล์ไปฝากที่ Litterbox (Catbox) ผ่าน CORS Proxy - รองรับสแกนข้ามเครื่อง 100%
+// อัปโหลดไฟล์ไปฝากที่ tmpfiles.org (ลบอัตโนมัติภายใน 24 ชม.)
 const uploadToTempStorage = async (base64Str) => {
   try {
     const blob = base64ToBlob(base64Str)
     const formData = new FormData()
-    formData.append('reqtype', 'fileupload')
-    formData.append('time', '24h') // ลบไฟล์อัตโนมัติภายใน 24 ชั่วโมง
-    formData.append('fileToUpload', blob, 'document.jpg')
+    formData.append('file', blob, 'document.jpg')
 
-    // ใช้ CorsProxy เพื่อป้องกันปัญหาติด CORS บน Client-side
-    const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent('https://litterbox.catbox.moe/resources/internals/api.php')
-
-    const response = await fetch(proxyUrl, {
+    const response = await fetch('https://tmpfiles.org/api/v1/upload', {
       method: 'POST',
       body: formData,
     })
 
-    const directUrl = await response.text()
-    if (directUrl && directUrl.trim().startsWith('http')) {
-      return directUrl.trim()
+    const result = await response.json()
+    if (result && result.status === 'success' && result.data?.url) {
+      // แปลง URL ให้เป็น Direct Link เพื่อให้แสดงผลรูปตรงๆ ได้ทันที
+      // ตัวอย่าง: https://tmpfiles.org/123456/document.jpg -> https://tmpfiles.org/dl/123456/document.jpg
+      const directUrl = result.data.url.replace('https://tmpfiles.org/', 'https://tmpfiles.org/dl/')
+      return directUrl
     }
     return null
   } catch (err) {
@@ -279,7 +277,7 @@ function ShareModal({ doc, onClose, onShareCreated }) {
       const token = generateToken()
       const expiresAt = new Date(Date.now() + duration * 60 * 1000)
 
-      // ฝากไฟล์ไว้ภายนอก (ลบอัตโนมัติภายใน 24 ชม.)
+      // ฝากไฟล์รูปภาพไว้ที่ tmpfiles.org (ลบอัตโนมัติภายใน 24 ชม.)
       const remoteImgUrl = await uploadToTempStorage(doc.imageData)
 
       await db.shares.add({
@@ -1412,7 +1410,7 @@ const settingsPanelStyle = {
 
 const settingRowStyle = {
   display: 'flex',
-  justifyContent: 'space-between',
+  justify: 'space-between',
   alignItems: 'center',
   marginBottom: '14px',
 }
