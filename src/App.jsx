@@ -96,7 +96,7 @@ const SHARE_DURATIONS = [
 ]
 
 // ============================================================
-// 3. UTILITIES & EXTERNAL UPLOAD (ใช้ Litterbox Catbox ลบรูปอัตโนมัติ 24ชม.)
+// 3. UTILITIES & EXTERNAL UPLOAD (ใช้ Litterbox Catbox + Proxy แก้ CORS)
 // ============================================================
 const fileToBase64 = (file) => {
   return new Promise((resolve, reject) => {
@@ -143,16 +143,19 @@ const base64ToBlob = (base64Str) => {
   return new Blob([uInt8Array], { type: contentType })
 }
 
-// อัปโหลดไฟล์ไปฝากที่ Litterbox (Catbox) - รองรับ Direct Hotlink บนมือถือ 100%
+// อัปโหลดไฟล์ไปฝากที่ Litterbox (Catbox) ผ่าน CORS Proxy - รองรับสแกนข้ามเครื่อง 100%
 const uploadToTempStorage = async (base64Str) => {
   try {
     const blob = base64ToBlob(base64Str)
     const formData = new FormData()
     formData.append('reqtype', 'fileupload')
-    formData.append('time', '24h') // กำหนดให้ลบไฟล์อัตโนมัติใน 24 ชั่วโมง
+    formData.append('time', '24h') // ลบไฟล์อัตโนมัติภายใน 24 ชั่วโมง
     formData.append('fileToUpload', blob, 'document.jpg')
 
-    const response = await fetch('https://litterbox.catbox.moe/resources/internals/api.php', {
+    // ใช้ CorsProxy เพื่อป้องกันปัญหาติด CORS บน Client-side
+    const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent('https://litterbox.catbox.moe/resources/internals/api.php')
+
+    const response = await fetch(proxyUrl, {
       method: 'POST',
       body: formData,
     })
@@ -1409,7 +1412,7 @@ const settingsPanelStyle = {
 
 const settingRowStyle = {
   display: 'flex',
-  justify: 'space-between',
+  justifyContent: 'space-between',
   alignItems: 'center',
   marginBottom: '14px',
 }
@@ -1458,5 +1461,6 @@ const viewerBoxStyle = {
   textAlign: 'center',
   maxWidth: '400px',
   width: '100%',
+  boxSizing: 'border-box',
   boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
 }
