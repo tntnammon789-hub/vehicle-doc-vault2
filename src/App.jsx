@@ -96,7 +96,7 @@ const SHARE_DURATIONS = [
 ]
 
 // ============================================================
-// 3. UTILITIES & EXTERNAL UPLOAD (ใช้ tmpfiles.org ลบอัตโนมัติใน 24 ชม.)
+// 3. UTILITIES & DIRECT IMAGE UPLOAD
 // ============================================================
 const fileToBase64 = (file) => {
   return new Promise((resolve, reject) => {
@@ -129,38 +129,25 @@ const formatThaiDate = (iso) => {
   return d.toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
-// แปลง Base64 เป็น Blob
-const base64ToBlob = (base64Str) => {
-  const parts = base64Str.split(';base64,')
-  const contentType = parts[0].split(':')[1] || 'image/jpeg'
-  const raw = window.atob(parts[1])
-  const rawLength = raw.length
-  const uInt8Array = new Uint8Array(rawLength)
-
-  for (let i = 0; i < rawLength; ++i) {
-    uInt8Array[i] = raw.charCodeAt(i)
-  }
-  return new Blob([uInt8Array], { type: contentType })
-}
-
-// อัปโหลดไฟล์ไปฝากที่ tmpfiles.org (ลบอัตโนมัติภายใน 24 ชม.)
+// อัปโหลดฝากรูปที่ Imgur Direct Link (แสดงผลรูปภาพได้ทันที 100%)
 const uploadToTempStorage = async (base64Str) => {
   try {
-    const blob = base64ToBlob(base64Str)
+    const cleanBase64 = base64Str.replace(/^data:image\/(png|jpg|jpeg);base64,/, '')
     const formData = new FormData()
-    formData.append('file', blob, 'document.jpg')
+    formData.append('image', cleanBase64)
+    formData.append('type', 'base64')
 
-    const response = await fetch('https://tmpfiles.org/api/v1/upload', {
+    const response = await fetch('https://api.imgur.com/3/image', {
       method: 'POST',
+      headers: {
+        Authorization: 'Client-ID c982463f03b0c26',
+      },
       body: formData,
     })
 
     const result = await response.json()
-    if (result && result.status === 'success' && result.data?.url) {
-      // แปลง URL ให้เป็น Direct Link เพื่อให้แสดงผลรูปตรงๆ ได้ทันที
-      // ตัวอย่าง: https://tmpfiles.org/123456/document.jpg -> https://tmpfiles.org/dl/123456/document.jpg
-      const directUrl = result.data.url.replace('https://tmpfiles.org/', 'https://tmpfiles.org/dl/')
-      return directUrl
+    if (result && result.success && result.data?.link) {
+      return result.data.link
     }
     return null
   } catch (err) {
@@ -277,7 +264,7 @@ function ShareModal({ doc, onClose, onShareCreated }) {
       const token = generateToken()
       const expiresAt = new Date(Date.now() + duration * 60 * 1000)
 
-      // ฝากไฟล์รูปภาพไว้ที่ tmpfiles.org (ลบอัตโนมัติภายใน 24 ชม.)
+      // ฝากไฟล์รูปภาพตรงที่เซิร์ฟเวอร์ที่รองรับ Direct Link
       const remoteImgUrl = await uploadToTempStorage(doc.imageData)
 
       await db.shares.add({
@@ -291,7 +278,7 @@ function ShareModal({ doc, onClose, onShareCreated }) {
         isActive: true,
       })
 
-      // ส่ง URL รูปที่ฝากไว้แทนภาพ Base64
+      // ส่ง Direct Image URL ไปแสดงผลรูปโดยตรง
       const sharePayload = {
         c: doc.category,
         p: doc.plateNumber,
@@ -731,7 +718,7 @@ function DocCard({ doc, onShare, onDelete }) {
 }
 
 // ============================================================
-// 8. SHARE VIEWER PAGE
+// 8. SHARE VIEWER PAGE (แสดงรูปภาพหน้าเว็บโดยตรงทันที)
 // ============================================================
 function ShareViewer({ token, encodedData }) {
   const [status, setStatus] = useState('loading')
@@ -739,14 +726,12 @@ function ShareViewer({ token, encodedData }) {
   const [inputPassword, setInputPassword] = useState('')
   const [error, setError] = useState('')
   const [viewCount, setViewCount] = useState(1)
-  const [imageError, setImageError] = useState(false)
 
   useEffect(() => {
     let cancelled = false
 
     const validate = async () => {
       try {
-        // กรณีที่ 1: เปิดจากเครื่องเดิมที่มีข้อมูลอยู่แล้ว
         if (token) {
           const share = await db.shares.where('token').equals(token).first()
           if (share && share.isActive) {
@@ -771,7 +756,6 @@ function ShareViewer({ token, encodedData }) {
           }
         }
 
-        // กรณีที่ 2: สแกนข้ามเครื่อง (ดึงรูปจาก Remote Temp Storage)
         if (encodedData) {
           const payload = safeDecodeData(encodedData)
 
@@ -974,35 +958,25 @@ function ShareViewer({ token, encodedData }) {
             </span>
           </div>
 
-          {doc.imageData && !imageError ? (
-            <div style={{ width: '100%', maxHeight: '65vh', display: 'flex', justifyContent: 'center', alignItems: 'center', overflow: 'hidden', borderRadius: '12px', border: '1px solid #e0e0e0', marginBottom: '16px', background: '#f8f9fa' }}>
+          {doc.imageData ? (
+            <div style={{ width: '100%', maxHeight: '65vh', display: 'flex', justifyContent: 'center', alignItems: 'center', overflow: 'hidden', borderRadius: '12px', border: '1px solid #e0e0e0', marginBottom: '16px', background: '#000' }}>
               <img
                 src={doc.imageData}
                 alt="เอกสารยานพาหนะ"
-                onError={() => setImageError(true)}
                 style={{
                   maxWidth: '100%',
                   maxHeight: '65vh',
                   objectFit: 'contain',
                   width: 'auto',
                   height: 'auto',
+                  display: 'block'
                 }}
               />
             </div>
           ) : (
             <div style={{ padding: '24px 16px', background: '#fff3e0', borderRadius: '12px', marginBottom: '16px', color: '#e65100', border: '1px solid #ffe0b2' }}>
               <div style={{ fontSize: '32px', marginBottom: '8px' }}>📄</div>
-              <p style={{ margin: '0 0 8px', fontWeight: 600, fontSize: '14px' }}>ยืนยันข้อมูลเอกสารเรียบร้อยแล้ว</p>
-              {doc.imageData && (
-                <a
-                  href={doc.imageData}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ fontSize: '12px', color: '#1a237e', textDecoration: 'underline' }}
-                >
-                  คลิกที่นี่เพื่อเปิดดูไฟล์รูปภาพโดยตรง
-                </a>
-              )}
+              <p style={{ margin: 0, fontWeight: 600, fontSize: '14px' }}>ไม่พบไฟล์รูปภาพเอกสาร</p>
             </div>
           )}
 
